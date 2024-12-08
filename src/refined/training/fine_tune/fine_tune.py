@@ -113,7 +113,7 @@ def run_fine_tuning_loops(refined: Refined, fine_tuning_args: TrainingArgs, trai
         total_loss = 0.0
         for step, batch in tqdm(enumerate(training_dataloader), total=len(training_dataloader)):
             batch = batch.to(fine_tuning_args.device)
-            with autocast():
+            with torch.amp.autocast():
                 output = model(batch=batch)
                 loss = output.ed_loss + output.et_loss + (output.description_loss * 0.01)
                 if fine_tuning_args.el:
