@@ -58,6 +58,46 @@ class EDLayer(nn.Module):
         """
         return []
 
+    def calc_info_nce_loss(self, targets, mention_embs, candidate_entity_embs, device, temperature=0.07):
+        mention_embs = mention_embs.unsqueeze(1)
+        batch_size, num_candidates, embedding_dim = candidate_entity_embs.shape
+        sim_matrix = F.cosine_similarity(mention_embs, candidate_entity_embs, dim=-1)
+        # print(targets)
+        # print('sim_matrix : ', sim_matrix.shape)
+
+        # 挑选出所有拥有正例的sim_matrix行
+        valid_sims = []
+        valid_indices = []
+        positive_indices = []
+        for i in range(sim_matrix.shape[0]):
+            if targets[i].item() < 30:
+                valid_sims.append(sim_matrix[i])
+                valid_indices.append(targets[i].item())
+        valid_sims_tn = torch.stack(valid_sims).to(device).view(len(valid_sims), -1)
+        valid_indices = torch.tensor(valid_indices, device=device).view(len(valid_sims), -1)
+        # 计算info_nce_loss
+        # print('valid_sims : ', valid_sims_tn.shape)
+        # print('valid_indices : ', valid_indices.shape)
+
+        positive_sim = torch.gather(valid_sims_tn, 1, valid_indices)
+        # print('positive sim : ', positive_sim.shape)
+
+        neg_mask = torch.ones_like(valid_sims_tn, dtype=torch.bool, device=device)
+        # print(valid_indices)
+        # print('neg_mask : ', neg_mask.shape)
+        row_indices = torch.arange(len(valid_sims))
+        neg_mask[row_indices, valid_indices.squeeze(1)] = False
+        # print(neg_mask)
+        negative_sim = valid_sims_tn[neg_mask].view(valid_sims_tn.shape[0], -1)
+        # print('negative sim : ', negative_sim.shape)
+        
+        # Compute InfoNCE loss
+        logits = torch.cat([positive_sim, negative_sim], dim=1) / temperature
+        target = torch.zeros(logits.size(0), dtype=torch.long, device=device)
+        info_nce_loss = F.cross_entropy(logits, target)
+        
+        return info_nce_loss 
+
     def forward(
         self,
         mention_embeddings: Tensor,
@@ -65,6 +105,9 @@ class EDLayer(nn.Module):
         candidate_entity_targets: Optional[Tensor] = None,
         candidate_desc_emb: Optional[Tensor] = None,
     ):
+        # print('candidate_entity_target', candidate_entity_targets.shape)
+        # print(candidate_entity_targets)
+        temperature = 0.07
         if self.add_hidden:
             mention_embeddings = self.mention_projection(
                 self.dropout(F.relu(self.hidden_layer(mention_embeddings)))
@@ -116,6 +159,9 @@ class EDLayer(nn.Module):
             )
             loss = F.cross_entropy(scores, targets)
 
+            info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
+            beta = 0.0
+            total_loss = (1.0 - beta) * loss + beta * info_nce_loss
             # Changed this loss Nov 17 2022 (have not trained model with this yet)
             # loss = F.cross_entropy(scores, targets, ignore_index=scores.size(-1) - 1)
             # if all targets are ignore_index value then loss is nan in torch 1.11
@@ -127,7 +173,7 @@ class EDLayer(nn.Module):
             # Q2 - if gold candidate has no description
             # Answer - should make NOTA (no_cand_score) the correct answer
             #          because none of the provided descriptions match the gold entity
-            return loss, F.softmax(scores, dim=-1)
+            return total_loss, F.softmax(scores, dim=-1)
         else:
             return None, F.softmax(scores, dim=-1)  # output (num_ents, num_cands + 1)
 

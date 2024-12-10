@@ -38,7 +38,7 @@ class TrainingArgs:
     # entity linking.
     entity_set: str = 'wikipedia'
 
-    data_dir: str = os.path.join(os.path.expanduser('~'), '.cache', 'refined')
+    data_dir: str = os.path.join('data')
     debug: bool = False
     transformer_name: str = "roberta-base"
     n_gpu: int = 1

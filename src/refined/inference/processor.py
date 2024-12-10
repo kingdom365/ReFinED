@@ -132,6 +132,7 @@ class Refined(object):
             # other handlers can be added here (to parse different entity types)
         }
 
+    """文本输入后的整个过程"""
     def process_text(
             self,
             text: str,

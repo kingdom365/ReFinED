@@ -34,6 +34,9 @@ class CandidateGeneratorExactMatch(CandidateGenerator):
         self.pem = pem
         self.human_qcodes = human_qcodes
 
+    '''
+        根据mention str生成candidates set 
+    '''
     def get_candidates(
             self,
             surface_form: str,
@@ -142,6 +145,7 @@ class CandidateGeneratorExactMatch(CandidateGenerator):
         if backward_coref:
             # pre-populate person co-reference dictionary so co-reference can occur backwards.
             for span in spans:
+                # 给每个mention span都生成一个candidates set
                 _, person_coreference = self.get_candidates(
                     surface_form=span.text,
                     person_coref_ref=person_coreference,

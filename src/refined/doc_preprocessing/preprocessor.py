@@ -257,6 +257,7 @@ class PreprocessorInferenceOnly(Preprocessor):
         """
         return self.class_handler.get_classes_idx_for_qcode_batch(qcodes=qcodes, shape=shape)
 
+    """获取提前准备好的entity description token_ids序列"""
     def get_descriptions_emb_for_qcode_batch(
             self, qcodes: List[str], shape: Tuple[int, ...] = None
     ) -> torch.Tensor:

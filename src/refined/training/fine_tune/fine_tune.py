@@ -103,6 +103,7 @@ def run_fine_tuning_loops(refined: Refined, fine_tuning_args: TrainingArgs, trai
                           checkpoint_every_n_steps: int = 1000000, scaler: GradScaler = GradScaler()):
     model = refined.model
     best_f1 = 0.0
+    
     for epoch_num in trange(fine_tuning_args.epochs):
         torch.cuda.empty_cache()
         optimizer.zero_grad()
@@ -113,11 +114,13 @@ def run_fine_tuning_loops(refined: Refined, fine_tuning_args: TrainingArgs, trai
         total_loss = 0.0
         for step, batch in tqdm(enumerate(training_dataloader), total=len(training_dataloader)):
             batch = batch.to(fine_tuning_args.device)
-            with torch.amp.autocast():
+            with torch.amp.autocast(device_type='cuda'):
                 output = model(batch=batch)
-                loss = output.ed_loss + output.et_loss + (output.description_loss * 0.01)
+                alpha = 0.01
+                ita = 0.01
+                loss = output.ed_loss + output.et_loss + (output.description_loss * alpha)  # alpha建议为0.01
                 if fine_tuning_args.el:
-                    loss += output.md_loss * 0.01
+                    loss += output.md_loss * ita
                 if fine_tuning_args.gradient_accumulation_steps >= 1:
                     loss = loss / fine_tuning_args.gradient_accumulation_steps
 
