@@ -229,7 +229,7 @@ class RefinedModel(nn.Module):
                 attention_mask=batch.attention_mask_values,
                 batch_elements=batch_elements,
                 device=current_device,
-                md_activations=md_activations,
+                md_activations=md_activations,  # MD阶段的结果
                 max_seq=batch.token_id_values.size(1)
             )
             if len(entity_spans) == 0:
@@ -299,16 +299,17 @@ class RefinedModel(nn.Module):
             batch.class_target_values, index_tensor=batch.entity_index_mask_values
         )
 
-        mention_embeddings = self._get_mention_embeddings(
+        mention_embeddings, mention_ctx_embedding = self._get_mention_embeddings(
             sequence_output=contextualised_embeddings,
-            token_acc_sums=token_acc_sums,
-            entity_mask=entity_mask,
+            token_acc_sums=token_acc_sums,  # 依靠token_acc_sums确定mention的位置
+            entity_mask=entity_mask,    # entity_mask如果batch中没有，就依赖_identify_mention提供MD阶段的识别结果
         )
 
         # candidate_description_scores.shape = (num_ents, num_cands)
         description_loss, candidate_description_scores = self.ed_2(
             candidate_desc=cand_desc,
             mention_embeddings=mention_embeddings,
+            contextualised_embedding=mention_ctx_embedding,
             candidate_entity_targets=candidate_entity_targets,
             candidate_desc_emb=cand_desc_emb,
         )
@@ -342,9 +343,11 @@ class RefinedModel(nn.Module):
             candidate_description_scores,
         )
 
+    # 从ctx_embs中提取mention_embs
     def _get_mention_embeddings(
             self, sequence_output: Tensor, token_acc_sums: Tensor, entity_mask: Tensor
     ):
+        ctx_emb = sequence_output[:, 0, :]
         sequence_output = self.mention_embedding_dropout(sequence_output)
         # [batch, seq_len]
         second_dim_ix = token_acc_sums
@@ -373,11 +376,16 @@ class RefinedModel(nn.Module):
         mention_embeddings = mention_embeddings / mention_length
         # Class labels
         # Boolean mask for only extracting entities
+        # mention span标记是batch训练数据中带有的，joint训练，推理阶段需要使用MD的结果
         entity_mask = entity_mask[:, :max_len]
+        # print('entity_mask : ', entity_mask.shape)
         boolean_mask = entity_mask != 0
 
+        # (bs, mention_num, ctx_len, hidden_dim)
+        # embeddings = embeddings.unsqueeze(1).repeat(1, mention_embeddings.shape[1], 1, 1)
         # Embeddings of entities only: [number_of_entities, embed_size]
-        return mention_embeddings[boolean_mask]
+        # 同时保留mentino ctx
+        return mention_embeddings[boolean_mask], ctx_emb
 
     def _identify_entity_mentions(
             self,

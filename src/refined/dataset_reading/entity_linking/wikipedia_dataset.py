@@ -145,7 +145,7 @@ class WikipediaDataset(torch.utils.data.IterableDataset):
                             start=start_idx,
                             ln=ln,
                             text=text[start_idx: start_idx + ln],
-                            gold_entity=Entity(wikidata_entity_id=qcode),
+                            gold_entity=Entity(wikidata_entity_id=qcode),   # gold entity依赖标注，可能引入噪声
                             coarse_type="MENTION"
                         )
                     )

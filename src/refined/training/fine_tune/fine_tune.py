@@ -117,8 +117,10 @@ def run_fine_tuning_loops(refined: Refined, fine_tuning_args: TrainingArgs, trai
             with torch.amp.autocast(device_type='cuda'):
                 output = model(batch=batch)
                 alpha = 0.01
+                lam_1 = 1.0
+                lam_2 = 1.0
                 ita = 0.01
-                loss = output.ed_loss + output.et_loss + (output.description_loss * alpha)  # alpha建议为0.01
+                loss = lam_1 * output.ed_loss + lam_2 * output.et_loss + (output.description_loss * alpha)  # alpha建议为0.01
                 if fine_tuning_args.el:
                     loss += output.md_loss * ita
                 if fine_tuning_args.gradient_accumulation_steps >= 1:
@@ -128,6 +130,7 @@ def run_fine_tuning_loops(refined: Refined, fine_tuning_args: TrainingArgs, trai
             total_loss += loss.item()
 
             if step % 100 == 99:
+                print('total_loss : ', total_loss, ', ed_layer_2 loss : ', output.description_loss)
                 LOG.info(f"Loss: {total_loss / step}")
 
             scaler.scale(loss).backward()

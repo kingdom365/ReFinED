@@ -62,13 +62,19 @@ class EDLayer(nn.Module):
 
     def calc_info_nce_loss(self, targets, mention_embs, candidate_entity_embs, device, temperature=0.07):
         query = mention_embs    # [mention_num, emb_size]
-        loss_func = InfoNCE(negative_mode='unpaired')
+        loss_func = InfoNCE(temperature=0.07, negative_mode='unpaired')
         info_nce_loss = 0.0
-        num_mentions = query.shape[0]
+        # num_mentions = query.shape[0]
+        num_mentions = targets.shape[0]
         num_cands = candidate_entity_embs.shape[1]
         for i in range(num_mentions):
             if targets[i].item() >= 30:
                 # no positives
+                # negatives = candidate_entity_embs[i,:,:]
+                # for j in range(negatives.shape[0]):
+                #     # print("query : ", query[i, :].shape)
+                #     # print("negatives : ", negatives[j,:].shape)
+                #     euclid_loss += torch.dist(query[i, :], negatives[j,:])
                 continue
             else:
                 positives = candidate_entity_embs[i, targets[i].item(), :].unsqueeze(0)
@@ -87,19 +93,27 @@ class EDLayer(nn.Module):
     def forward(
         self,
         mention_embeddings: Tensor,
+        contextualised_embedding: Tensor,
         candidate_desc: Tensor,
         candidate_entity_targets: Optional[Tensor] = None,
         candidate_desc_emb: Optional[Tensor] = None,
     ):
         # print('candidate_entity_target', candidate_entity_targets.shape)
         # print(candidate_entity_targets)
-        temperature = 0.07
+        # (mention, definition)
+        # print('ctx_emb : ', contextualised_embedding.shape)
+        ctx_emb = contextualised_embedding
+        # mention_with_ctx = torch.cat([mention_embeddings, contextualised_embeddings], dim=1)
         if self.add_hidden:
             mention_embeddings = self.mention_projection(
                 self.dropout(F.relu(self.hidden_layer(mention_embeddings)))
             )
+            ctx_emb = self.mention_projection(
+                self.dropout(F.relu(self.hidden_layer(contextualised_embedding)))
+            )
         else:
             mention_embeddings = self.mention_projection(mention_embeddings)
+            ctx_emb = self.mention_projection(ctx_emb)
 
         if candidate_desc_emb is None:
             candidate_entity_embeddings = self.description_encoder(
@@ -108,6 +122,9 @@ class EDLayer(nn.Module):
         else:
             candidate_entity_embeddings = candidate_desc_emb  # (num_ents, num_cands, output_dim)
 
+        # layer norm
+        # candidate_entity_embeddings = candidate_entity_embeddings / candidate_entity_embeddings.norm(dim=1, keepdim=True)
+        # mention_embeddings = mention_embeddings / mention_embeddings.norm(dim=1, keepdim=True)
         scores = (candidate_entity_embeddings @ mention_embeddings.unsqueeze(-1)).squeeze(
             -1
         )  # dot product
@@ -139,15 +156,22 @@ class EDLayer(nn.Module):
             no_cand_index.fill_(
                 scores.size(-1) - 1
             )
+            # print('before targets : ', targets)
+            # print('scores : ', scores.shape)
             # make NOTA (no_cand_score) the correct answer when the correct entity has no description
             targets = torch.where(
                 scores[torch.arange(scores.size(0)), targets] != mask_value, targets, no_cand_index
             )
+            # print('after targets : ', targets)
             loss = F.cross_entropy(scores, targets)
 
-            info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
-            beta = 1.0
-            total_loss = (1.0 - beta) * loss + beta * info_nce_loss
+            # print('mention_embs : ', mention_embeddings.shape)
+            ctx_embs = ctx_emb.repeat(mention_embeddings.shape[0], 1)
+            # print('ctx_embs : ', ctx_embs.shape)
+            # info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
+            info_nce_loss = self.calc_info_nce_loss(targets, ctx_embs, candidate_entity_embeddings, scores.device)
+            beta = 0.01
+            total_loss = loss + beta * info_nce_loss
             # Changed this loss Nov 17 2022 (have not trained model with this yet)
             # loss = F.cross_entropy(scores, targets, ignore_index=scores.size(-1) - 1)
             # if all targets are ignore_index value then loss is nan in torch 1.11
