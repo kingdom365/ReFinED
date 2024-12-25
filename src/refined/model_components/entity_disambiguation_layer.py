@@ -53,6 +53,7 @@ class EntityDisambiguation(nn.Module):
         :param current_device: the device (e.g. cuda:0, or cpu) to use (required for multi-gpu to avoid deadlock)
         :return: loss tensor (if candidate_targets is provided), candidate entity (ED) activations tensor
         """
+        # entity typing score: euclid distance
         predicted_classes = class_activations
         predicted_classes_expanded = predicted_classes.unsqueeze(1)
         candidate_diff_classes = candidate_classes - predicted_classes_expanded

@@ -62,3 +62,4 @@ Thumbs.db
 *.cpython-37.pyc
 
 example_scripts/fine_tuned_models/
+unseen_mentions*

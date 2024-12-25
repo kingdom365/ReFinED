@@ -122,9 +122,6 @@ class EDLayer(nn.Module):
         else:
             candidate_entity_embeddings = candidate_desc_emb  # (num_ents, num_cands, output_dim)
 
-        # layer norm
-        # candidate_entity_embeddings = candidate_entity_embeddings / candidate_entity_embeddings.norm(dim=1, keepdim=True)
-        # mention_embeddings = mention_embeddings / mention_embeddings.norm(dim=1, keepdim=True)
         scores = (candidate_entity_embeddings @ mention_embeddings.unsqueeze(-1)).squeeze(
             -1
         )  # dot product
