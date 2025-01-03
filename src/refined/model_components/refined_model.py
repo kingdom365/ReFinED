@@ -207,6 +207,7 @@ class RefinedModel(nn.Module):
 
         # forward pass of transformer's (e.g. BERT) layers
         # unpacking does not work for object
+        # print('batch.token_id : ', batch.token_id_values.shape)
         output: BaseModelOutputWithPoolingAndCrossAttentions = self.transformer(
             input_ids=batch.token_id_values,
             attention_mask=batch.attention_mask_values,
@@ -299,7 +300,7 @@ class RefinedModel(nn.Module):
             batch.class_target_values, index_tensor=batch.entity_index_mask_values
         )
 
-        mention_embeddings, mention_ctx_embedding = self._get_mention_embeddings(
+        mention_embeddings, batch_split_mention_embs, mention_ctx_embedding = self._get_mention_embeddings(
             sequence_output=contextualised_embeddings,
             token_acc_sums=token_acc_sums,  # 依靠token_acc_sums确定mention的位置
             entity_mask=entity_mask,    # entity_mask如果batch中没有，就依赖_identify_mention提供MD阶段的识别结果
@@ -309,6 +310,8 @@ class RefinedModel(nn.Module):
         description_loss, candidate_description_scores = self.ed_2(
             candidate_desc=cand_desc,
             mention_embeddings=mention_embeddings,
+            batch_tokens=batch.token_id_values,
+            batch_split_mention_embeddings=batch_split_mention_embs,
             contextualised_embedding=mention_ctx_embedding,
             candidate_entity_targets=candidate_entity_targets,
             candidate_desc_emb=cand_desc_emb,
@@ -347,7 +350,9 @@ class RefinedModel(nn.Module):
     def _get_mention_embeddings(
             self, sequence_output: Tensor, token_acc_sums: Tensor, entity_mask: Tensor
     ):
+        # (bs, 768)
         ctx_emb = sequence_output[:, 0, :]
+
         sequence_output = self.mention_embedding_dropout(sequence_output)
         # [batch, seq_len]
         second_dim_ix = token_acc_sums
@@ -376,16 +381,30 @@ class RefinedModel(nn.Module):
         mention_embeddings = mention_embeddings / mention_length
         # Class labels
         # Boolean mask for only extracting entities
-        # mention span标记是batch训练数据中带有的，joint训练，推理阶段需要使用MD的结果
         entity_mask = entity_mask[:, :max_len]
-        # print('entity_mask : ', entity_mask.shape)
         boolean_mask = entity_mask != 0
 
+        # expand ctx_emb to shape (bs, seq_len, 768)
+        batch_ctx_embs = []
+        for batch_num in range(entity_mask.shape[0]):
+            batch_mask = entity_mask[batch_num, :max_len].unsqueeze(0)
+            # (1, seq_len, 768)
+            batch_ctx_emb = ctx_emb[batch_num, :].repeat(mention_embeddings.shape[1], 1).unsqueeze(0)
+            batch_boolean_mask = batch_mask != 0
+            # (selected_len, 768)
+            batch_ctx_emb = batch_ctx_emb[batch_boolean_mask]
+            batch_ctx_embs.append(batch_ctx_emb)
+        ctx_emb = torch.cat(batch_ctx_embs, dim=0)
+
+        batch_split_mention_embs = []
+        for batch_num in range(entity_mask.shape[0]):
+            batch_mask = entity_mask[batch_num, :max_len].unsqueeze(0)
+            batch_boolean_mask = batch_mask != 0
+            batch_mention_emb = mention_embeddings[batch_num].unsqueeze(0)
+            batch_split_mention_embs.append(batch_mention_emb[batch_boolean_mask])
+
         # (bs, mention_num, ctx_len, hidden_dim)
-        # embeddings = embeddings.unsqueeze(1).repeat(1, mention_embeddings.shape[1], 1, 1)
-        # Embeddings of entities only: [number_of_entities, embed_size]
-        # 同时保留mentino ctx
-        return mention_embeddings[boolean_mask], ctx_emb
+        return mention_embeddings[boolean_mask], batch_split_mention_embs, ctx_emb
 
     def _identify_entity_mentions(
             self,

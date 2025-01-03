@@ -9,5 +9,5 @@ refined = Refined.from_pretrained(model_name='wikipedia_model',
 dataset = get_datasets_obj(preprocessor=refined.preprocessor)
 fine_tune_on_docs(refined=refined,
                   train_docs=dataset.get_aida_docs("train", include_gold_label=True),
-                  eval_docs=dataset.get_aida_docs("dev", include_gold_label=True))
+                  eval_docs=dataset.get_aida_docs("test", include_gold_label=True))
 # To fine-tune on EL on the WebQSP (questions) dataset use `dataset.get_webqsp_docs("train", include_gold_label=True)`.

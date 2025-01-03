@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import CrossEntropyLoss
-
+from refined.model_components.crf import CRF
 
 # This is the label index to ignore when calculating cross entropy loss
 # IGNORE_INDEX = -1
@@ -22,6 +22,7 @@ class MentionDetection(nn.Module):
         self.num_labels = num_labels
         self.dropout = nn.Dropout(dropout)
         self.linear = nn.Linear(hidden_size, num_labels)
+        # self.crf = CRF(num_tags=num_labels, batch_first=True)
         self.init_weights()
 
     def init_weights(self):
