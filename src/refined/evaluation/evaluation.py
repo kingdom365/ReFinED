@@ -323,7 +323,7 @@ def evaluate(evaluation_dataset_name_to_docs: Dict[str, Iterable[Doc]],
             el=True,
             ed_threshold=ed_threshold,
             return_special_spans=return_special_spans,
-            filter_nil_spans=True  # makes EL evaluation more fair
+            filter_nil_spans=False  # makes EL evaluation more fair
         )
         for dataset_name, metrics in el_results.items():
             dataset_name_to_metrics[f"{dataset_name}-EL"] = metrics
