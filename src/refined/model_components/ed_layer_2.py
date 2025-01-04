@@ -69,7 +69,7 @@ class EDLayer(nn.Module):
         num_mentions = targets.shape[0]
         num_cands = candidate_entity_embs.shape[1]
         for i in range(num_mentions):
-            if targets[i].item() >= 30:
+            if targets[i].item() == 0:
                 # no positives
                 # negatives = candidate_entity_embs[i,:,:]
                 # for j in range(negatives.shape[0]):
@@ -78,10 +78,10 @@ class EDLayer(nn.Module):
                 #     euclid_loss += torch.dist(query[i, :], negatives[j,:])
                 continue
             else:
-                positives = candidate_entity_embs[i, targets[i].item(), :].unsqueeze(0)
+                positives = candidate_entity_embs[i, targets[i].item() - 1, :].unsqueeze(0)
                 negatives = candidate_entity_embs[i, :, :].squeeze(0)
                 neg_mask = torch.ones_like(negatives, dtype=torch.bool)
-                neg_mask[targets[i], :] = False 
+                neg_mask[targets[i].item() - 1, :] = False 
                 negatives = negatives[neg_mask].view(num_cands - 1, -1)
                 # print('query shape : ', query.shape)
                 # print('positives shape : ', positives.shape)
