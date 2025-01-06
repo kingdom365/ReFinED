@@ -73,7 +73,7 @@ class EDLayer(nn.Module):
             mention_embeddings = self.mention_projection(mention_embeddings)
 
         if candidate_desc_emb is None:
-            candidate_entity_embeddings = self.description_encoder(
+            candidate_entity_embeddings, _ = self.description_encoder(
                 candidate_desc
             )  # (num_ents, num_cands, output_dim)
         else:
