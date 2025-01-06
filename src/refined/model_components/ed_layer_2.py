@@ -69,7 +69,7 @@ class EDLayer(nn.Module):
         num_mentions = targets.shape[0]
         num_cands = candidate_entity_embs.shape[1]
         for i in range(num_mentions):
-            if targets[i].item() == 0:
+            if targets[i].item() >= 30:
                 # no positives
                 # negatives = candidate_entity_embs[i,:,:]
                 # for j in range(negatives.shape[0]):
