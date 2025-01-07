@@ -15,6 +15,7 @@ from refined.doc_preprocessing.preprocessor import Preprocessor
 from refined.utilities.preprocessing_utils import pad
 from refined.model_components.config import ModelConfig
 from refined.model_components.ed_layer_2 import EDLayer
+from refined.model_components.cross_attention import CrossAttention
 from refined.model_components.entity_disambiguation_layer import EntityDisambiguation
 from refined.model_components.entity_typing_layer import EntityTyping
 from refined.model_components.mention_detection_layer import MentionDetection
@@ -90,6 +91,11 @@ class RefinedModel(nn.Module):
             mention_dim=self.transformer_config.hidden_size, preprocessor=preprocessor
         )
 
+        # cross attention
+        self.cross_attention: nn.Module = CrossAttention(
+            mention_dim=self.transformer_config.hidden_size, preprocessor=preprocessor
+        )
+
         # restore common weights for context encoder layers
         self.transformer: PreTrainedModel = preprocessor.get_transformer_model()
 
@@ -132,6 +138,9 @@ class RefinedModel(nn.Module):
     def get_ed_params(self) -> List[nn.Parameter]:
         return list(self.entity_disambiguation.parameters())
 
+    def get_cross_attention_params(self) -> List[nn.Parameter]:
+        return list(self.cross_attention.get_parameters_to_scale())
+
     def get_kg_params(self) -> List[nn.Parameter]:
         return list(self.kg_layer.parameters())
 
@@ -145,7 +154,8 @@ class RefinedModel(nn.Module):
         """
         mention_transformer_params = list(self.transformer.parameters())
         entity_description_transformer_params = list(self.ed_2.get_parameters_not_to_scale())
-        return mention_transformer_params + entity_description_transformer_params
+        cross_attention_params = list(self.cross_attention.get_parameters_not_to_scale())
+        return mention_transformer_params + entity_description_transformer_params + cross_attention_params
 
     def init_weights(self):
         """Initialize weights for all member variables with type nn.Module"""
@@ -223,9 +233,10 @@ class RefinedModel(nn.Module):
         )
 
         # prepare tensors for ET and ED layers
+        batches_num_ents, batches_spans = None, None
         if batch.token_acc_sum_values is None:
             # mention-entity spans are not provided so the result from md layer must be used to determine spans
-            token_acc_sums, entity_mask, entity_spans, other_spans, candidate_tensors = self._identify_entity_mentions(
+            token_acc_sums, entity_mask, entity_spans, other_spans, candidate_tensors, batches_num_ents, batches_spans = self._identify_entity_mentions(
                 attention_mask=batch.attention_mask_values,
                 batch_elements=batch_elements,
                 device=current_device,
@@ -293,22 +304,41 @@ class RefinedModel(nn.Module):
             # the dataset are standard entity spans
             # TODO: may want to change this in the future so special spans can be provided
             entity_spans = [span for b in batch_elements for span in b.spans]
+            batches_spans = []
+            for b in batch_elements:
+                batch_spans = []
+                for span in b.spans:
+                    batch_spans.append(span)
+                batches_spans.append(batch_spans)
             other_spans = {}
 
         class_targets = self._expand_class_targets(
             batch.class_target_values, index_tensor=batch.entity_index_mask_values
         )
 
-        mention_embeddings = self._get_mention_embeddings(
+        mention_embeddings, b_num_ents = self._get_mention_embeddings(
             sequence_output=contextualised_embeddings,
             token_acc_sums=token_acc_sums,
             entity_mask=entity_mask,
         )
 
+        if batches_num_ents is None:
+            batches_num_ents = b_num_ents
+
         # candidate_description_scores.shape = (num_ents, num_cands)
-        description_loss, candidate_description_scores = self.ed_2(
-            candidate_desc=cand_desc,
+        # description_loss, candidate_description_scores = self.ed_2(
+        #     candidate_desc=cand_desc,
+        #     mention_embeddings=mention_embeddings,
+        #     candidate_entity_targets=candidate_entity_targets,
+        #     candidate_desc_emb=cand_desc_emb,
+        # )
+
+        description_loss, candidate_description_scores = self.cross_attention(
             mention_embeddings=mention_embeddings,
+            batches_num_ents=batches_num_ents,
+            seq_embeddings=contextualised_embeddings,
+            spans=batches_spans,
+            candidate_desc=cand_desc,
             candidate_entity_targets=candidate_entity_targets,
             candidate_desc_emb=cand_desc_emb,
         )
@@ -376,8 +406,16 @@ class RefinedModel(nn.Module):
         entity_mask = entity_mask[:, :max_len]
         boolean_mask = entity_mask != 0
 
+        batches_num_ents = []
+        for batch in range(batch_size):
+            batch_entity_mask = entity_mask[batch, :max_len].unsqueeze(0)
+            batch_boolean_mask = batch_entity_mask != 0
+            batch_mention_embeddings = mention_embeddings[batch, :, :].unsqueeze(0)
+            batch_mention_embeddings = batch_mention_embeddings[batch_boolean_mask]
+            batches_num_ents.append(batch_mention_embeddings.shape[0])
+
         # Embeddings of entities only: [number_of_entities, embed_size]
-        return mention_embeddings[boolean_mask]
+        return mention_embeddings[boolean_mask], batches_num_ents
 
     def _identify_entity_mentions(
             self,
@@ -397,6 +435,8 @@ class RefinedModel(nn.Module):
                         explanation about why this needs to be passed in.
         :return: acc_sums, b_entity_mask, spans, candidate_tensors
         """
+        batches_num_ents = []
+        batches_spans = []
         person_coreference = dict()
 
         # TODO: this can be optimized by tensorizing some of the steps such as pem lookups.
@@ -408,6 +448,8 @@ class RefinedModel(nn.Module):
         bio_preds = (md_activations.argmax(dim=2) * attention_mask)[:, 1:].detach().cpu().numpy()
         prev_page_title = None
         for batch_idx, batch_elem in enumerate(batch_elements):
+            batch_num_ents = 0
+            batch_spans = []
             preds = [self.ix_to_ner_tag[p] for p in bio_preds[batch_idx].tolist()]
             bio_spans = bio_to_offset_pairs(preds, use_labels=True)
             spans_for_batch: List[Span] = []
@@ -429,6 +471,8 @@ class RefinedModel(nn.Module):
                 )
                 if coarse_type == "MENTION":
                     spans_for_batch.append(span)
+                    batches_num_ents += 1
+                    batch_spans.append(span)
                 else:
                     # Other spans (e.g. "DATE" spans)
                     special_type_spans_for_batch[coarse_type].append(span)
@@ -455,6 +499,8 @@ class RefinedModel(nn.Module):
             # TODO: do we need to add special type spans to batch element here?
             batch_elem.add_spans(spans_for_batch)
             spans.extend(spans_for_batch)
+            batches_num_ents.append(batch_num_ents)
+            batches_spans.append(batch_spans)
 
             for coarse_type, type_spans in special_type_spans_for_batch.items():
                 special_type_spans[coarse_type] += type_spans
@@ -537,7 +583,7 @@ class RefinedModel(nn.Module):
             b_cand_desc,
             b_cand_desc_emb,
         )
-        return acc_sums, b_entity_mask, spans, special_type_spans, candidate_tensors
+        return acc_sums, b_entity_mask, spans, special_type_spans, candidate_tensors, batches_num_ents, batches_spans
 
     @staticmethod
     def _expand_tensors(

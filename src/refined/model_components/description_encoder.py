@@ -82,8 +82,9 @@ class DescriptionEncoder(nn.Module):
         embeddings = torch.zeros(input_ids.size(0), 768, device=input_ids.device)
         embeddings[masked_cands_idx] = pad_candidate
 
+        seq_embeddings_pad_candidate = torch.zeros(32, 768, device=input_ids.device)
         seq_embeddings = torch.zeros(input_ids.size(0), 32, 768, device=input_ids.device)
-        seq_embeddings[masked_cands_idx] = pad_candidate.unsqueeze(1).expand(-1, 32, -1)
+        seq_embeddings[masked_cands_idx] = seq_embeddings_pad_candidate
 
         if unmasked_cands.size(0) > 0:
             outputs = self.transformer(input_ids=unmasked_cands, attention_mask=attention_mask)
@@ -94,17 +95,16 @@ class DescriptionEncoder(nn.Module):
             cls_embeddings = self.projection(self.dropout(F.relu(self.hidden_layer(embeddings)))).view(
                 (num_ents, max_cands, self.output_dim)
             )
-            seq_embeddings = seq_embeddings.permute(0, 2, 1).contiguous()
-            seq_embeddings = self.projection(self.dropout(F.relu(self.hidden_layer(embeddings)))).permute(0, 2, 1).contiguous().view(
-                (num_ents, max_cands, 32, self.output_dim)
+            # seq_embeddings = seq_embeddings.permute(0, 2, 1).contiguous()
+            seq_embeddings = seq_embeddings.view(
+                (num_ents, max_cands, 32, -1)
             )
             return cls_embeddings, seq_embeddings
         else:
             cls_embeddings = self.projection(self.dropout(embeddings)).view(
                 (num_ents, max_cands, self.output_dim)
             )
-            seq_embeddings = seq_embeddings.permute(0, 2, 1).contiguous()
-            seq_embeddings = self.projection(self.dropout(seq_embeddings)).permute(0, 2, 1).contiguous().view(
-                (num_ents, max_cands, 32, self.output_dim)
+            seq_embeddings = seq_embeddings.view(
+                (num_ents, max_cands, 32, -1)
             )
             return cls_embeddings, seq_embeddings

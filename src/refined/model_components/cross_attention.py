@@ -5,6 +5,7 @@ from torch import nn, Tensor
 from refined.data_types.base_types import Span 
 
 from refined.doc_preprocessing.preprocessor import Preprocessor
+from refined.model_components.description_encoder import DescriptionEncoder
 
 class CrossAttention(nn.Module):
     def __init__(
@@ -12,51 +13,71 @@ class CrossAttention(nn.Module):
         preprocessor: Preprocessor,
         mention_dim=768,
         output_dim=300,
-        hidden_dim=300,
+        hidden_dim=1000,
         dropout=0.1,
         add_hidden=False,
-        description_encoder=None,
     ):
         super().__init__()
+        self.add_hidden = add_hidden
         self.dropout = nn.Dropout(dropout)
         self.hidden_layer = nn.Linear(mention_dim, hidden_dim)
-        self.decoder_layer = nn.TransformerDecoderLayer(d_model=hidden_dim, nhead=8)
-        self.cross_attention = nn.TransformerDecoder(self.decoder_layer, num_layers=6)
+        self.decoder_layer = nn.TransformerDecoderLayer(d_model=mention_dim, nhead=6)
+        self.cross_attention = nn.TransformerDecoder(self.decoder_layer, num_layers=2)
         if add_hidden:
-            self.mention_projection = nn.Linear(hidden_dim, hidden_dim)
+            self.mention_projection = nn.Linear(hidden_dim, output_dim)
         else:
-            self.mention_projection = nn.Linear(mention_dim, hidden_dim)
-        self.description_encoder = description_encoder
+            self.mention_projection = nn.Linear(mention_dim, output_dim)
+        self.description_encoder = DescriptionEncoder(
+            output_dim=output_dim, ff_chunk_size=4, preprocessor=preprocessor
+        )
 
-    @classmethod
-    def get_embeddings_(cls, seq, token_acc, entity_mask):
-        pass
+    def get_parameters_to_scale(self) -> List[nn.Parameter]:
+        """
+        Gets parameters that can be scaled during training. Usually top/last layers.
+        :return: list of parameters
+        """
+        mention_projection_params = list(self.mention_projection.parameters())
+        hidden_layer_projection_params = list(self.hidden_layer.parameters())
+        description_encoder_projection_params = list(
+            self.description_encoder.projection.parameters()
+        )
+        description_encoder_hidden_params = list(self.description_encoder.hidden_layer.parameters())
+        description_encoder_params = list(self.description_encoder.transformer.parameters())
+        cross_attention_params = list(self.cross_attention.parameters())
+        return (
+            mention_projection_params
+            + description_encoder_projection_params
+            + description_encoder_params
+            + hidden_layer_projection_params
+            + description_encoder_hidden_params
+            + cross_attention_params
+        )
+
+    def get_parameters_not_to_scale(self) -> List[nn.Parameter]:
+        """
+        Gets parameters that can be scaled during training. Usually top/last layers.
+        :return: list of parameters
+        """
+        return []
 
     def forward(
         self,
         mention_embeddings: Tensor,
-        batch_split_mention_embeddings: List[Tensor],
-        batch_mention_interval: List[List[Tuple]],
-        seq_embeddings: List[Tensor],
-        spans: List[Span],
+        batches_num_ents: List,
+        seq_embeddings: Tensor,
+        spans: List[List[Span]],
         candidate_desc: Tensor,
         candidate_entity_targets: Optional[Tensor] = None,
         candidate_desc_emb: Optional[Tensor] = None,
     ):
         """
             mention_embeddings: (num_ents, 768) 
-            batch_split_mention_embeddings: (bs, (batch_num_ents, 768))
-            batch_mention_interval: (bs, batch_num_ents, 2[start, end])
+            batches_num_ents: (bs, num_ents)
             seq_embeddings: (bs, (seq_len, 768))
             spans: (all_num_ents)
             candidate_desc: (num_ents, num_cands, ?[desc_len])
             candidate_desc_emb: (num_ents, num_cands, hidden_dim)
         """
-        # num_ents in batch
-        batches = []
-        for m in range(len(batch_split_mention_embeddings)):
-            batches.append(m.shape[0])
-
         if self.add_hidden:
             mention_embeddings = self.mention_projection(
                 self.dropout(F.relu(self.hidden_layer(mention_embeddings)))
@@ -73,6 +94,7 @@ class CrossAttention(nn.Module):
             _, candidate_seq_embeddings = self.description_encoder(
                 candidate_desc
             )
+            # (num_ents, num_cands, desc_seq_len, output_dim)
 
 
         # =========================================================
@@ -81,7 +103,7 @@ class CrossAttention(nn.Module):
             -1
         )  # dot product
         # scores.shape = (num_ents, num_cands)
-        assert self.description_encoder == None, "cross_attention : must input description_encoder module!"
+        assert self.description_encoder != None, "cross_attention : must input description_encoder module!"
         mask_value = -100  # very large number may have been overflowing cause -inf loss
         if candidate_desc_emb is not None:
             # assumes candidate_desc_emb is initialised to all 0s
@@ -95,6 +117,8 @@ class CrossAttention(nn.Module):
                 candidate_desc[:, :, 0] == self.description_encoder.tokenizer.pad_token_id
             ) * mask_value
         scores = (scores * multiplication_mask) + addition_mask
+        no_cand_score = torch.zeros((scores.size(0), 1), device=scores.device)
+        scores = torch.cat([scores, no_cand_score], dim=-1)
         # =========================================================
 
         if candidate_entity_targets is not None:
@@ -107,43 +131,54 @@ class CrossAttention(nn.Module):
             targets = torch.where(
                 scores[torch.arange(scores.size(0)), targets] != mask_value, targets, no_cand_index
             ) 
-
-
-        no_cand_score = torch.zeros((scores.size(0), 1), device=scores.device)
-        scores = torch.cat([scores, no_cand_score], dim=-1)
-
+        
         # candidate_desc : (num_ents, num_cands, 1)
         # seq_embeddings : (bs, seq_len, 768)
-        last_start = 1
+        last_start = 0
         loss = 0.0
-        for batch_num in range(len(seq_embeddings)):
+        for batch_num in range(len(batches_num_ents)):
             # in-batch-sample: cands
             # input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0).repeat(candidate_desc.shape[0], 1, 1)
             # (batch_num_ents, max_cands, 32, output_dim)
-            batch_candidate_seq_embeddings = candidate_seq_embeddings[(last_start - 1):(last_start - 1) + batches[batch_num], :, :, :]
+            # print('candidate_seq_embeddings : ', candidate_seq_embeddings.shape)
+            batch_candidate_seq_embeddings = candidate_seq_embeddings[last_start:last_start + batches_num_ents[batch_num], :, :, :]
+            # print('batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings.shape)
             for ent in range(batch_candidate_seq_embeddings.shape[0]):
                 # for every ent
-                # (1, seq_len, 768) ==> (cands, seq_len, 768)
-                input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0).repeat(candidate_desc.shape[0], 1, 1)
+                # (1, seq_len, mention_dim) ==> (cands, seq_len, mention_dim)
+                # print('seq_embeddings : ', seq_embeddings.shape)
+                input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0).repeat(batch_candidate_seq_embeddings.shape[1], 1, 1)
                 # (cands, seq_len, hidden_size)
-                out_seqs = self.cross_attention(input_seqs, batch_candidate_seq_embeddings[ent, :, :, :])                
-                ent_span = spans[(last_start - 1):(last_start - 1) + batches[batch_num]][ent]
+                # print('input_seqs : ', input_seqs.shape)
+                # print('batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings[ent, :, :, :].shape)
+                # (seq_len, bs, dim)
+                out_seqs = self.cross_attention(input_seqs.permute(1, 0, 2).contiguous(), batch_candidate_seq_embeddings[ent, :, :, :].permute(1, 0, 2).contiguous())                
+                out_seqs = out_seqs.permute(1, 0, 2).contiguous()
+                ent_span = spans[batch_num][ent]
                 # (cands, mention_start:mention_end, hidden_size)
-                enhance_mention_embs = out_seqs[:, ent_span.start:ent.span_start + ent_span.ln, :]
+                if ent_span.ln == 0:
+                    continue
+                enhance_mention_embs = out_seqs[:, ent_span.start:ent_span.start + ent_span.ln, :]
+                # print('enhance_mention_embs:', enhance_mention_embs.shape)
                 # loss = -sim(m, target_e) + sim(m, negative_e)
-                for cand in range(batch_candidate_seq_embeddings.shape[1]):
+                for cand in range(batch_candidate_seq_embeddings.shape[0]):
+                    if cand >= 30:
+                        break
                     avgpool_mention_emb = enhance_mention_embs[cand, :, :].mean(dim=0)
-                    scores[(last_start - 1) + ent, cand] = (candidate_entity_embeddings[(last_start - 1):(last_start - 1) + batch_num, cand, :] @ avgpool_mention_emb)
+                    # print('avgpool_mention_emb : ', avgpool_mention_emb.shape)
+                    # print('split batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings[last_start + ent:, cand, 0, :].shape)
+                    scores[last_start + ent, cand] = (batch_candidate_seq_embeddings[last_start + ent, cand, 0, :] @ avgpool_mention_emb)
 
-            if candidate_entity_targets is not None: 
-                # train
+            # train
+            if candidate_entity_targets is not None:
                 for ent in range(batch_candidate_seq_embeddings.shape[0]):
                     for cand in range(batch_candidate_seq_embeddings.shape[1]):
                         if cand != targets[ent].item():
                             loss += scores[ent, cand]
                         else:
                             loss += -scores[ent, cand]
-        
+            last_start += batches_num_ents[batch_num]
+
         if candidate_entity_targets is not None:
             return loss, F.softmax(scores, dim=-1)
         else:
