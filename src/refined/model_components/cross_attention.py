@@ -21,8 +21,8 @@ class CrossAttention(nn.Module):
         self.add_hidden = add_hidden
         self.dropout = nn.Dropout(dropout)
         self.hidden_layer = nn.Linear(mention_dim, hidden_dim)
-        self.decoder_layer = nn.TransformerDecoderLayer(d_model=mention_dim, nhead=6)
-        self.cross_attention = nn.TransformerDecoder(self.decoder_layer, num_layers=2)
+        self.decoder_layer = nn.TransformerDecoderLayer(d_model=output_dim, nhead=4)
+        self.cross_attention = nn.TransformerDecoder(self.decoder_layer, num_layers=1)
         if add_hidden:
             self.mention_projection = nn.Linear(hidden_dim, output_dim)
         else:
@@ -82,8 +82,13 @@ class CrossAttention(nn.Module):
             mention_embeddings = self.mention_projection(
                 self.dropout(F.relu(self.hidden_layer(mention_embeddings)))
             )
+            seq_embeddings = self.mention_projection(
+                self.dropout(F.relu(self.hidden_layer(seq_embeddings)))
+            )
         else:
             mention_embeddings = self.mention_projection(mention_embeddings)
+            seq_embeddings = self.mention_projection(seq_embeddings)
+            # (bs, seq_len, output_dim)
 
         if candidate_desc_emb is None:
             candidate_entity_embeddings, candidate_seq_embeddings = self.description_encoder(
@@ -141,45 +146,68 @@ class CrossAttention(nn.Module):
             # input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0).repeat(candidate_desc.shape[0], 1, 1)
             # (batch_num_ents, max_cands, 32, output_dim)
             # print('candidate_seq_embeddings : ', candidate_seq_embeddings.shape)
+            # example内包含一个输入seq，一个seq包含多个mention，每个mention对应自己的多个cands
             batch_candidate_seq_embeddings = candidate_seq_embeddings[last_start:last_start + batches_num_ents[batch_num], :, :, :]
+            # (bs, seq_len, output_dim) ==> (1, seq_len, output_dim)
+            input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0)
+            rolled_input_seqs = input_seqs.permute(1, 0, 2).contiguous()
+            # print('batch ', batch_num, ': ents = ', batches_num_ents[batch_num])
             # print('batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings.shape)
-            for ent in range(batch_candidate_seq_embeddings.shape[0]):
-                # for every ent
-                # (1, seq_len, mention_dim) ==> (cands, seq_len, mention_dim)
-                # print('seq_embeddings : ', seq_embeddings.shape)
-                input_seqs = seq_embeddings[batch_num, :, :].unsqueeze(0).repeat(batch_candidate_seq_embeddings.shape[1], 1, 1)
-                # (cands, seq_len, hidden_size)
-                # print('input_seqs : ', input_seqs.shape)
-                # print('batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings[ent, :, :, :].shape)
-                # (seq_len, bs, dim)
-                out_seqs = self.cross_attention(input_seqs.permute(1, 0, 2).contiguous(), batch_candidate_seq_embeddings[ent, :, :, :].permute(1, 0, 2).contiguous())                
-                out_seqs = out_seqs.permute(1, 0, 2).contiguous()
+            # print('seq mention num : ', batches_num_ents[batch_num])
+            for ent in range(batches_num_ents[batch_num]):
                 ent_span = spans[batch_num][ent]
-                # (cands, mention_start:mention_end, hidden_size)
                 if ent_span.ln == 0:
                     continue
+                # print('ent is ', ent)
+                # for every ent
+                # print('seq_embeddings : ', seq_embeddings.shape)
+                # print('input_seqs : ', rolled_input_seqs.shape)
+                # print('batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings[ent, :, :, :].shape)
+                # (seq_len, bs, dim)
+                # rolled_candidate_seq_embeddings = batch_candidate_seq_embeddings[ent, :, :, :].permute(1, 0, 2).contiguous()
+                if candidate_entity_targets is None or targets[last_start + ent] >= 30:
+                    # only has 'gold entity' matters
+                    continue
+                # (batch_num_ents, cands, 32, output_dim) ==> (1, 32, output_dim) ==> (32, 1, output_dim)
+                gold_entity_seq_embeddings = batch_candidate_seq_embeddings[ent, targets[last_start + ent], :, :].unsqueeze(0).permute(1, 0, 2).contiguous()
+                # print('gold_entity_seq_embeddings : ', gold_entity_seq_embeddings.shape)
+                out_seqs = self.cross_attention(rolled_input_seqs, gold_entity_seq_embeddings)
+                # (seq_len, 1, output_dim) ==> (1, seq_len, output_dim)
+                out_seqs = out_seqs.permute(1, 0, 2).contiguous()
+                # (cands, mention_start:mention_end, hidden_size)
+                # (1, mention_len, output_dim)
                 enhance_mention_embs = out_seqs[:, ent_span.start:ent_span.start + ent_span.ln, :]
+                # print('enhance_mention_embs : ', enhance_mention_embs.shape)
+                if enhance_mention_embs.shape[1] == 0:
+                    continue
+                avgpool_mention_emb = enhance_mention_embs[0, :, :].mean(dim=0)
+                # scores[last_start + ent, targets[last_start + ent]] = (batch_can)
                 # print('enhance_mention_embs:', enhance_mention_embs.shape)
                 # loss = -sim(m, target_e) + sim(m, negative_e)
-                for cand in range(batch_candidate_seq_embeddings.shape[0]):
-                    if cand >= 30:
-                        break
-                    avgpool_mention_emb = enhance_mention_embs[cand, :, :].mean(dim=0)
+                # print('cands num : ', batch_candidate_seq_embeddings.shape[1])
+                # print('avgpool_mention_emb : ', avgpool_mention_emb)
+                for cand in range(batch_candidate_seq_embeddings.shape[1]):
+                    # avgpool_mention_emb = enhance_mention_embs[cand, :, :].mean(dim=0)
+                    # avgpool_cand_emb = batch_candidate_seq_embeddings[last_start + ent, cand, :, :].mean(dim=0)
                     # print('avgpool_mention_emb : ', avgpool_mention_emb.shape)
                     # print('split batch_candidate_seq_embeddings : ', batch_candidate_seq_embeddings[last_start + ent:, cand, 0, :].shape)
+                    # scores[last_start + ent, cand] = (batch_candidate_seq_embeddings[last_start + ent, cand, 0, :] @ avgpool_mention_emb)
+                    # print('dot product : ', (avgpool_cand_emb @ avgpool_mention_emb))
+                    # print('avgpool_cand_emb : ', avgpool_cand_emb)
                     scores[last_start + ent, cand] = (batch_candidate_seq_embeddings[last_start + ent, cand, 0, :] @ avgpool_mention_emb)
+                del out_seqs
+                del enhance_mention_embs
+                torch.cuda.empty_cache()
 
-            # train
-            if candidate_entity_targets is not None:
-                for ent in range(batch_candidate_seq_embeddings.shape[0]):
-                    for cand in range(batch_candidate_seq_embeddings.shape[1]):
-                        if cand != targets[ent].item():
-                            loss += scores[ent, cand]
-                        else:
-                            loss += -scores[ent, cand]
             last_start += batches_num_ents[batch_num]
+            del input_seqs
+            del rolled_input_seqs
+            del batch_candidate_seq_embeddings
+            torch.cuda.empty_cache()
 
         if candidate_entity_targets is not None:
+            loss = F.cross_entropy(scores, targets)
+            # print('cross_attention loss : ', loss.item())
             return loss, F.softmax(scores, dim=-1)
         else:
             return None, F.softmax(scores, dim=-1)

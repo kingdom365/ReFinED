@@ -471,7 +471,7 @@ class RefinedModel(nn.Module):
                 )
                 if coarse_type == "MENTION":
                     spans_for_batch.append(span)
-                    batches_num_ents += 1
+                    batch_num_ents += 1
                     batch_spans.append(span)
                 else:
                     # Other spans (e.g. "DATE" spans)
