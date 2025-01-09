@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import CrossEntropyLoss
-from refined.model_components.crf import CRF
 
 # This is the label index to ignore when calculating cross entropy loss
 # IGNORE_INDEX = -1

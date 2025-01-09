@@ -6,6 +6,7 @@ from torch import Tensor, nn
 
 from refined.doc_preprocessing.preprocessor import Preprocessor
 from refined.model_components.description_encoder import DescriptionEncoder
+from refined.data_types.base_types import Span
 
 from info_nce import InfoNCE, info_nce
 from transformers import AutoModel, AutoTokenizer
@@ -95,6 +96,7 @@ class EDLayer(nn.Module):
         self,
         mention_embeddings: Tensor,
         batch_tokens: Tensor,
+        batches_spans: List[List[Span]],
         batch_split_mention_embeddings: List[Tensor],
         contextualised_embedding: Tensor,
         candidate_desc: Tensor,
@@ -105,80 +107,40 @@ class EDLayer(nn.Module):
         # print(candidate_entity_targets)
         # (mention, definition)
         # print('ctx_emb : ', contextualised_embedding.shape)
-        # (bs, 768)
+        # (num_ents, 768)
         ctx_emb = contextualised_embedding
-        # cross_ctx_embs = []
-        # batch_ents_nums = []
-        # for batch_num in range(batch_tokens.shape[0]):
-        #     batch_num_ents = batch_split_mention_embeddings[batch_num].shape[0]
-        #     batch_ents_nums.append(batch_split_mention_embeddings[batch_num].shape[0])
-        #     batch_ctx_emb = batch_tokens[batch_num]
-        #     # (num_cands, ctx_len)
-        #     batch_ctx_embs = batch_ctx_emb.unsqueeze(0).repeat(batch_num_ents, candidate_desc.shape[1], 1)
-        #     cross_ctx_embs.append(batch_ctx_embs)
-        # (num_ents, num_cands, ctx_len)
-        # cross_ctx_embs = torch.cat(cross_ctx_embs, dim=0)
-        # mention_with_ctx = torch.cat([mention_embeddings, contextualised_embeddings], dim=1)
+        # combine ctx_emb with mention_embs
+        # 1. for every mention embedding, mul with len of mention
+        i = 0
+        new_mention_embeddings = []
+        for sample_num in range(len(batches_spans)):
+            for span in batches_spans[sample_num]:
+                new_mention_embedding = mention_embeddings[i, :] * span.ln
+                new_mention_embedding = (ctx_emb[i, :] + new_mention_embedding) / (span.ln + 1)
+                new_mention_embeddings.append(new_mention_embedding.unsqueeze(0))
+                i += 1
+        # (num_ents, 768)
+        mention_embeddings = torch.cat(new_mention_embeddings, dim=0)
+        ret_mention_embeddings = mention_embeddings
+        
         if self.add_hidden:
             # mention:ctx
-            # print('mention_embs : ', mention_embeddings.shape)
-            # print('ctx_emb : ', ctx_emb.shape)
-            # ctx_embs = ctx_emb.repeat(mention_embeddings.shape[0], 1)
-            # ctx_embs = torch.cat([mention_embeddings, ctx_embs], dim = 1)
-            # ctx_embs = self.ctx_projection(
-            #     self.dropout(F.relu(self.hidden_layer(ctx_embs)))
-            # )
+            # (num_ents, 768)
             mention_embeddings = self.mention_projection(
                 self.dropout(F.relu(self.hidden_layer(mention_embeddings)))
             )
-            ctx_emb = self.mention_projection(
-                self.dropout(F.relu(self.hidden_layer(ctx_emb)))
-            )
         else:
-            # print('mention_embs : ', mention_embeddings.shape)
-            # print('mention_embs : ', mention_embeddings.shape)
-            # print('ctx_emb : ', ctx_emb.shape)
-            # ctx_embs = ctx_emb.repeat(mention_embeddings.shape[0], 1)
-            # ctx_embs = torch.cat([mention_embeddings, ctx_embs], dim = 1)
-            # print('after ctx_embs : ', ctx_embs.shape)
-            # print('mention_embs : ', mention_embeddings.shape)
-            # ctx_embs = self.ctx_projection(ctx_embs)
             mention_embeddings = self.mention_projection(mention_embeddings)
-            ctx_emb = self.mention_projection(ctx_emb)
 
         if candidate_desc_emb is None:
             candidate_entity_embeddings = self.description_encoder(
                 candidate_desc
             )  # (num_ents, num_cands, output_dim)
-            
-            # cross_mat = torch.cat((cross_ctx_embs[:, :, :32], candidate_desc), dim=-1)
-            # print('cross_mat : ', cross_mat.shape)
-            # (num_ents, nums_cands, output_dim)
-            # cross_entity_embeddings = self.cross_encoder(
-            #     cross_mat
-            # )
-            # (num_ents, num_cands, 1)
-            # cross_scores = self.cross_encoder_projection(cross_entity_embeddings)
-            # (num_ents, num_cands, 1) --> (num_ents, num_cands)
-            # cross_scores = cross_scores.squeeze(-1)
-            # print('cross_scores : ', cross_scores.shape)
         else:
             # When ED, freeze desc decoder, only use candidate_entity_embs
             candidate_entity_embeddings = candidate_desc_emb  # (num_ents, num_cands, output_dim)
         
-        # batch_split_ctx_embs = []
-        # # print('batch_split_mention : ', len(batch_split_mention_embeddings))
-        # for batch_num in range(ctx_emb.shape[0]):
-        #     # (num_ents, 300) num_ents = sum(all_batch_num_ents)
-        #     # print('batch_split_mention : ', batch_split_mention_embeddings[batch_num].shape)
-        #     batch_split_ctx_embs.append(
-        #         ctx_emb[batch_num, :].unsqueeze(0).repeat(batch_split_mention_embeddings[batch_num].shape[0], 1)
-        #     )
-        # (num_ents_in_all_batches, 300)
-        # final_ctx_embs = torch.cat(batch_split_ctx_embs, dim=0)
-        ctx_with_mentions = (ctx_emb + mention_embeddings) / 2
-
-        scores = (candidate_entity_embeddings @ ctx_with_mentions.unsqueeze(-1)).squeeze(
+        scores = (candidate_entity_embeddings @ mention_embeddings.unsqueeze(-1)).squeeze(
             -1
         )  # dot product
         # scores.shape = (num_ents, num_cands)
@@ -240,11 +202,11 @@ class EDLayer(nn.Module):
             info_nce_loss = self.calc_info_nce_loss(targets, ctx_with_mentions, candidate_entity_embeddings, scores.device)
             '''
 
-            info_nce_loss = self.calc_info_nce_loss(targets, ctx_emb, candidate_entity_embeddings, scores.device)
+            info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
 
             # print('ctx_embs : ', ctx_embs.shape)
             # info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
-            beta = 0.01
+            beta = 0.1
             total_loss = (1.0 - beta) * loss + beta * info_nce_loss
             # Changed this loss Nov 17 2022 (have not trained model with this yet)
             # loss = F.cross_entropy(scores, targets, ignore_index=scores.size(-1) - 1)
@@ -257,9 +219,9 @@ class EDLayer(nn.Module):
             # Q2 - if gold candidate has no description
             # Answer - should make NOTA (no_cand_score) the correct answer
             #          because none of the provided descriptions match the gold entity
-            return total_loss, F.softmax(scores, dim=-1)
+            return total_loss, F.softmax(scores, dim=-1), ret_mention_embeddings
         else:
-            return None, F.softmax(scores, dim=-1)  # output (num_ents, num_cands + 1)
+            return None, F.softmax(scores, dim=-1), ret_mention_embeddings  # output (num_ents, num_cands + 1)
 
     def init_weights(self):
         """Initialize weights for all member variables with type nn.Module"""

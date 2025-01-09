@@ -224,9 +224,11 @@ class RefinedModel(nn.Module):
         )
 
         # prepare tensors for ET and ED layers
+        # [sample1_spans:[span1, span2, ,,,], sample2_spans:[...], ...]
+        batches_spans = None
         if batch.token_acc_sum_values is None:
             # mention-entity spans are not provided so the result from md layer must be used to determine spans
-            token_acc_sums, entity_mask, entity_spans, other_spans, candidate_tensors = self._identify_entity_mentions(
+            token_acc_sums, entity_mask, entity_spans, other_spans, candidate_tensors, batches_spans = self._identify_entity_mentions(
                 attention_mask=batch.attention_mask_values,
                 batch_elements=batch_elements,
                 device=current_device,
@@ -294,6 +296,12 @@ class RefinedModel(nn.Module):
             # the dataset are standard entity spans
             # TODO: may want to change this in the future so special spans can be provided
             entity_spans = [span for b in batch_elements for span in b.spans]
+            batches_spans = []
+            for b in batch_elements:
+                batch_spans = []
+                for span in b.spans:
+                    batch_spans.append(span)
+                batches_spans.append(batch_spans)
             other_spans = {}
 
         class_targets = self._expand_class_targets(
@@ -304,13 +312,15 @@ class RefinedModel(nn.Module):
             sequence_output=contextualised_embeddings,
             token_acc_sums=token_acc_sums,  # 依靠token_acc_sums确定mention的位置
             entity_mask=entity_mask,    # entity_mask如果batch中没有，就依赖_identify_mention提供MD阶段的识别结果
+            batches_spans=batches_spans,
         )
 
         # candidate_description_scores.shape = (num_ents, num_cands)
-        description_loss, candidate_description_scores = self.ed_2(
+        description_loss, candidate_description_scores, update_mention_embeddings = self.ed_2(
             candidate_desc=cand_desc,
             mention_embeddings=mention_embeddings,
             batch_tokens=batch.token_id_values,
+            batches_spans=batches_spans,
             batch_split_mention_embeddings=batch_split_mention_embs,
             contextualised_embedding=mention_ctx_embedding,
             candidate_entity_targets=candidate_entity_targets,
@@ -319,7 +329,7 @@ class RefinedModel(nn.Module):
 
         # forward pass of entity typing layer (using predetermined spans if provided else span identified by md layer)
         et_loss, et_activations = self.entity_typing(
-            mention_embeddings=mention_embeddings, span_classes=class_targets
+            mention_embeddings=update_mention_embeddings, span_classes=class_targets
         )
 
         # forward pass of entity disambiguation layer
@@ -348,7 +358,7 @@ class RefinedModel(nn.Module):
 
     # 从ctx_embs中提取mention_embs
     def _get_mention_embeddings(
-            self, sequence_output: Tensor, token_acc_sums: Tensor, entity_mask: Tensor
+            self, sequence_output: Tensor, token_acc_sums: Tensor, entity_mask: Tensor, batches_spans: List[List[Span]]
     ):
         # (bs, 768)
         ctx_emb = sequence_output[:, 0, :]
@@ -384,18 +394,6 @@ class RefinedModel(nn.Module):
         entity_mask = entity_mask[:, :max_len]
         boolean_mask = entity_mask != 0
 
-        # expand ctx_emb to shape (bs, seq_len, 768)
-        batch_ctx_embs = []
-        for batch_num in range(entity_mask.shape[0]):
-            batch_mask = entity_mask[batch_num, :max_len].unsqueeze(0)
-            # (1, seq_len, 768)
-            batch_ctx_emb = ctx_emb[batch_num, :].repeat(mention_embeddings.shape[1], 1).unsqueeze(0)
-            batch_boolean_mask = batch_mask != 0
-            # (selected_len, 768)
-            batch_ctx_emb = batch_ctx_emb[batch_boolean_mask]
-            batch_ctx_embs.append(batch_ctx_emb)
-        ctx_emb = torch.cat(batch_ctx_embs, dim=0)
-
         batch_split_mention_embs = []
         for batch_num in range(entity_mask.shape[0]):
             batch_mask = entity_mask[batch_num, :max_len].unsqueeze(0)
@@ -403,6 +401,14 @@ class RefinedModel(nn.Module):
             batch_mention_emb = mention_embeddings[batch_num].unsqueeze(0)
             batch_split_mention_embs.append(batch_mention_emb[batch_boolean_mask])
 
+        batches_ctx_emb = []
+        for sample_num in range(len(batches_spans)):
+            sample_num_ents = len(batches_spans[sample_num])
+            # (num_ents_sample, 768)
+            sample_ctx_emb = ctx_emb[sample_num, :].unsqueeze(0).repeat(sample_num_ents, 1)
+            batches_ctx_emb.append(sample_ctx_emb)
+        # (num_ents, 768)
+        ctx_emb = torch.cat(batches_ctx_emb, dim=0)
         # (bs, mention_num, ctx_len, hidden_dim)
         return mention_embeddings[boolean_mask], batch_split_mention_embs, ctx_emb
 
@@ -429,6 +435,7 @@ class RefinedModel(nn.Module):
         # TODO: this can be optimized by tensorizing some of the steps such as pem lookups.
         spans: List[Span] = []
         special_type_spans: Dict[str, List[Span]] = defaultdict(list)
+        ret_batches_spans = []
 
         # (bs, max_seq_ln) - includes [SEP],[1:] removes [CLS]
         # very small tensor (e.g. (bs, max_seq) and simple operations so fine on CPU)
@@ -438,6 +445,7 @@ class RefinedModel(nn.Module):
             preds = [self.ix_to_ner_tag[p] for p in bio_preds[batch_idx].tolist()]
             bio_spans = bio_to_offset_pairs(preds, use_labels=True)
             spans_for_batch: List[Span] = []
+            batch_spans = []
             special_type_spans_for_batch: Dict[str, List[Span]] = defaultdict(list)
             for start_list_idx, end_list_idx, coarse_type in bio_spans:
                 if end_list_idx > len(batch_elem.tokens):
@@ -456,6 +464,7 @@ class RefinedModel(nn.Module):
                 )
                 if coarse_type == "MENTION":
                     spans_for_batch.append(span)
+                    batch_spans.append(span)
                 else:
                     # Other spans (e.g. "DATE" spans)
                     special_type_spans_for_batch[coarse_type].append(span)
@@ -482,6 +491,7 @@ class RefinedModel(nn.Module):
             # TODO: do we need to add special type spans to batch element here?
             batch_elem.add_spans(spans_for_batch)
             spans.extend(spans_for_batch)
+            ret_batches_spans.append(batch_spans)
 
             for coarse_type, type_spans in special_type_spans_for_batch.items():
                 special_type_spans[coarse_type] += type_spans
@@ -564,7 +574,7 @@ class RefinedModel(nn.Module):
             b_cand_desc,
             b_cand_desc_emb,
         )
-        return acc_sums, b_entity_mask, spans, special_type_spans, candidate_tensors
+        return acc_sums, b_entity_mask, spans, special_type_spans, candidate_tensors, ret_batches_spans
 
     @staticmethod
     def _expand_tensors(
