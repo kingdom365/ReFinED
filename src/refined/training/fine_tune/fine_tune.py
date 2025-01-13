@@ -78,7 +78,8 @@ def start_fine_tuning_task(refined: 'Refined', train_docs: Iterable[Doc],
         {"params": model.get_et_params(), "lr": fine_tuning_args.lr * 100},
         {"params": model.get_desc_params(), "lr": fine_tuning_args.lr},
         {"params": model.get_ed_params(), "lr": fine_tuning_args.lr * 100},
-        {"params": model.get_parameters_not_to_scale(), "lr": fine_tuning_args.lr}
+        {"params": model.get_parameters_not_to_scale(), "lr": fine_tuning_args.lr},
+        {"params": model.get_cross_encoder_params(), "lr": fine_tuning_args.lr}
     ]
     if fine_tuning_args.el:
         param_groups.append({"params": model.get_md_params(), "lr": fine_tuning_args.lr})

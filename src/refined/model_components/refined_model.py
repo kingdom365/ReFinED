@@ -16,6 +16,7 @@ from refined.utilities.preprocessing_utils import pad
 from refined.model_components.config import ModelConfig
 from refined.model_components.ed_layer_2 import EDLayer
 from refined.model_components.cross_attention import CrossAttention
+from refined.model_components.ed_layer_cross_2 import CrossEncoder
 from refined.model_components.entity_disambiguation_layer import EntityDisambiguation
 from refined.model_components.entity_typing_layer import EntityTyping
 from refined.model_components.mention_detection_layer import MentionDetection
@@ -92,8 +93,13 @@ class RefinedModel(nn.Module):
         )
 
         # cross attention
-        self.cross_attention: nn.Module = CrossAttention(
-            mention_dim=self.transformer_config.hidden_size, preprocessor=preprocessor
+        # self.cross_attention: nn.Module = CrossAttention(
+        #     mention_dim=self.transformer_config.hidden_size, preprocessor=preprocessor
+        # )
+
+        # cross encoder
+        self.cross_encoder: nn.Module = CrossEncoder(
+            preprocessor=preprocessor, mention_dim=self.transformer_config.hidden_size
         )
 
         # restore common weights for context encoder layers
@@ -138,8 +144,11 @@ class RefinedModel(nn.Module):
     def get_ed_params(self) -> List[nn.Parameter]:
         return list(self.entity_disambiguation.parameters())
 
-    def get_cross_attention_params(self) -> List[nn.Parameter]:
-        return list(self.cross_attention.get_parameters_to_scale())
+    # def get_cross_attention_params(self) -> List[nn.Parameter]:
+    #     return list(self.cross_attention.get_parameters_to_scale())
+
+    def get_cross_encoder_params(self) -> List[nn.Parameter]:
+        return list(self.cross_encoder.get_parameters_to_scale())
 
     def get_kg_params(self) -> List[nn.Parameter]:
         return list(self.kg_layer.parameters())
@@ -154,8 +163,9 @@ class RefinedModel(nn.Module):
         """
         mention_transformer_params = list(self.transformer.parameters())
         entity_description_transformer_params = list(self.ed_2.get_parameters_not_to_scale())
-        cross_attention_params = list(self.cross_attention.get_parameters_not_to_scale())
-        return mention_transformer_params + entity_description_transformer_params + cross_attention_params
+        # cross_attention_params = list(self.cross_attention.get_parameters_not_to_scale())
+        # cross_encoder_params = list(self.cross_encoder.get_parameters_not_to_scale())
+        return mention_transformer_params + entity_description_transformer_params
 
     def init_weights(self):
         """Initialize weights for all member variables with type nn.Module"""
@@ -333,14 +343,23 @@ class RefinedModel(nn.Module):
         #     candidate_desc_emb=cand_desc_emb,
         # )
 
-        description_loss, candidate_description_scores = self.cross_attention(
+        # description_loss, candidate_description_scores = self.cross_attention(
+        #     mention_embeddings=mention_embeddings,
+        #     batches_num_ents=batches_num_ents,
+        #     seq_embeddings=contextualised_embeddings,
+        #     spans=batches_spans,
+        #     candidate_desc=cand_desc,
+        #     candidate_entity_targets=candidate_entity_targets,
+        #     candidate_desc_emb=cand_desc_emb,
+        # )
+
+        description_loss, candidate_description_scores = self.cross_encoder(
             mention_embeddings=mention_embeddings,
-            batches_num_ents=batches_num_ents,
-            seq_embeddings=contextualised_embeddings,
-            spans=batches_spans,
-            candidate_desc=cand_desc,
-            candidate_entity_targets=candidate_entity_targets,
+            batches_spans=batches_spans,
+            ctx_tokens=batch.token_id_values,
+            cand_desc=cand_desc,
             candidate_desc_emb=cand_desc_emb,
+            candidate_entity_targets=candidate_entity_targets,
         )
 
         # forward pass of entity typing layer (using predetermined spans if provided else span identified by md layer)
