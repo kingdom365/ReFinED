@@ -19,7 +19,7 @@ class FineTuningArgs(TrainingArgs):
     ed_dropout: float = 0.05
     et_dropout: float = 0.10
     gradient_accumulation_steps: int = 4
-    epochs: int = 10
+    epochs: int = 20
     lr: float = 5e-5
     batch_size: int = 1
     ed_threshold: float = 0.15

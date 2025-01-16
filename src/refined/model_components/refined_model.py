@@ -101,6 +101,7 @@ class RefinedModel(nn.Module):
         self.cross_encoder: nn.Module = CrossEncoder(
             preprocessor=preprocessor, mention_dim=self.transformer_config.hidden_size
         )
+        self.last_epoch = 0
 
         # restore common weights for context encoder layers
         self.transformer: PreTrainedModel = preprocessor.get_transformer_model()
@@ -270,6 +271,7 @@ class RefinedModel(nn.Module):
                     description_loss=None,
                     candidate_description_scores=torch.zeros([num_ents, self.preprocessor.max_candidates + 1],
                                                              device=current_device),
+                    idx_mp=dict()
                 )
                 # return ModelReturn(md_loss, md_activations, None, None, None, None, [], other_spans, None, None, None)
             (
@@ -320,6 +322,8 @@ class RefinedModel(nn.Module):
                 for span in b.spans:
                     batch_spans.append(span)
                 batches_spans.append(batch_spans)
+            # print('batches_spans contains ', num_ents_cnt)
+            # print('candidate_desc shape : ', batch.candidate_desc.shape)
             other_spans = {}
 
         class_targets = self._expand_class_targets(
@@ -336,12 +340,14 @@ class RefinedModel(nn.Module):
             batches_num_ents = b_num_ents
 
         # candidate_description_scores.shape = (num_ents, num_cands)
-        # description_loss, candidate_description_scores = self.ed_2(
-        #     candidate_desc=cand_desc,
-        #     mention_embeddings=mention_embeddings,
-        #     candidate_entity_targets=candidate_entity_targets,
-        #     candidate_desc_emb=cand_desc_emb,
-        # )
+        coarse_description_loss, candidate_description_scores, rerank_tuples = self.ed_2(
+            candidate_desc=cand_desc,
+            mention_embeddings=mention_embeddings,
+            candidate_entity_targets=candidate_entity_targets,
+            candidate_desc_emb=cand_desc_emb,
+            candidate_pem_values=candidate_pem_values,
+            candidate_classes=candidate_classes,
+        )
 
         # description_loss, candidate_description_scores = self.cross_attention(
         #     mention_embeddings=mention_embeddings,
@@ -353,14 +359,16 @@ class RefinedModel(nn.Module):
         #     candidate_desc_emb=cand_desc_emb,
         # )
 
-        description_loss, candidate_description_scores = self.cross_encoder(
+        fine_description_loss, candidate_description_scores, update_targets, update_candidate_pem_values, update_candidate_classes, idx_mp = self.cross_encoder(
             mention_embeddings=mention_embeddings,
             batches_spans=batches_spans,
             ctx_tokens=batch.token_id_values,
-            cand_desc=cand_desc,
-            candidate_desc_emb=cand_desc_emb,
-            candidate_entity_targets=candidate_entity_targets,
+            rerank_tuples=rerank_tuples,
         )
+        description_loss = None
+        if coarse_description_loss is not None and fine_description_loss is not None:
+            description_loss =  coarse_description_loss + fine_description_loss
+        # print('description_loss : ', description_loss)
 
         # forward pass of entity typing layer (using predetermined spans if provided else span identified by md layer)
         et_loss, et_activations = self.entity_typing(
@@ -370,11 +378,12 @@ class RefinedModel(nn.Module):
         # forward pass of entity disambiguation layer
         ed_loss, ed_activations = self.entity_disambiguation(
             class_activations=et_activations.detach() if self.detach_ed_layer else et_activations,
-            candidate_entity_targets=candidate_entity_targets,
-            candidate_pem_values=candidate_pem_values,
-            candidate_classes=candidate_classes,
+            candidate_entity_targets=update_targets,
+            candidate_pem_values=update_candidate_pem_values,
+            candidate_classes=update_candidate_classes,
             candidate_description_scores=candidate_description_scores.detach(),  # detach or not
             current_device=current_device,
+            idx_mp=idx_mp,
         )
 
         return ModelReturn(
@@ -389,6 +398,7 @@ class RefinedModel(nn.Module):
             cand_ids,
             description_loss,
             candidate_description_scores,
+            idx_mp
         )
 
     def _get_mention_embeddings(
@@ -497,6 +507,7 @@ class RefinedModel(nn.Module):
                     special_type_spans_for_batch[coarse_type].append(span)
 
             spans_for_batch.sort(key=lambda x: x.start)
+            batch_spans.sort(key=lambda x: x.start)
             for type_spans in special_type_spans_for_batch.values():
                 type_spans.sort(key=lambda x: x.start)
 
@@ -525,6 +536,7 @@ class RefinedModel(nn.Module):
                 special_type_spans[coarse_type] += type_spans
 
         num_ents = len([span for batch_elm in batch_elements for span in batch_elm.spans])
+        # print('num_ents in identify : ', num_ents)
         if num_ents == 0:
             return None, None, [], special_type_spans, None
 

@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 import torch
 import torch.nn.functional as F
@@ -35,6 +35,7 @@ class EntityDisambiguation(nn.Module):
 
     def forward(
         self,
+        idx_mp: Dict,
         class_activations=None,
         candidate_entity_targets=None,
         candidate_pem_values=None,
@@ -113,7 +114,8 @@ class EntityDisambiguation(nn.Module):
 
         if candidate_entity_targets is not None:
             # assumes argmax will select last index if no gold entity
-            loss = F.cross_entropy(logits_with_none_above, candidate_entity_targets.argmax(dim=1))
+            # loss = F.cross_entropy(logits_with_none_above, candidate_entity_targets.argmax(dim=1))
+            loss = F.cross_entropy(logits_with_none_above, candidate_entity_targets.to(logits_with_none_above.device))
             return loss, logits_with_none_above
 
         return None, logits_with_none_above

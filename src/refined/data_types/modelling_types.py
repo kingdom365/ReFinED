@@ -104,6 +104,7 @@ class ModelReturn(NamedTuple):
     cand_ids: Tensor
     description_loss: Optional[Tensor]
     candidate_description_scores: Tensor
+    idx_mp: Dict
 
 
 @dataclass

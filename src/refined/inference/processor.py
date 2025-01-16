@@ -329,13 +329,25 @@ class Refined(object):
         )
 
         ed_targets_predictions = output.ed_activations.argmax(dim=1)
+        # print('ed_targets_predictions : ', ed_targets_predictions)
+        # print('output.idx_mp : ', output.idx_mp)
+        # print('cand_ids : ', cand_ids.shape)
+        origin_ed_targets_predictions = torch.cat([torch.tensor(output.idx_mp[i][ed_targets_predictions[i].item()]).to(ed_targets_predictions.device).unsqueeze(0) for i in range(ed_targets_predictions.size(0))], dim=0)
+        # print('after map ed_targets_predictions : ', ed_targets_predictions)
+        # print('ed_activations : ', output.ed_activations.shape)
         ed_targets_softmax = output.ed_activations.softmax(dim=1)
 
         description_scores = output.candidate_description_scores.detach().cpu().numpy()
 
         predicted_entity_ids = (
-            cand_ids[torch.arange(cand_ids.size(0)), ed_targets_predictions].cpu().numpy().tolist()
+            cand_ids[torch.arange(cand_ids.size(0)), origin_ed_targets_predictions].cpu().numpy().tolist()
         )
+        update_cand_ids = []
+        for i in range(cand_ids.size(0)):
+            update_cand = cand_ids[i, [j for j in output.idx_mp[i]]].unsqueeze(0)
+            update_cand_ids.append(update_cand)
+        update_cand_ids = torch.cat(update_cand_ids, dim=0)
+        # print('update_cand_ids : ', update_cand_ids.shape)
         predicted_entity_confidence = round_list(
             ed_targets_softmax[torch.arange(ed_targets_softmax.size(0)), ed_targets_predictions]
                 .cpu()
@@ -361,8 +373,9 @@ class Refined(object):
             span_to_classes[span_idx].append((class_id, class_label, conf))
 
         sorted_entity_ids_scores, old_indices = ed_targets_softmax.sort(descending=True)
+        # print('old_indices : ', old_indices)
         sorted_entity_ids_scores = sorted_entity_ids_scores.cpu().numpy().tolist()
-        sorted_entity_ids = self.sort_tensor(cand_ids, old_indices).cpu().numpy().tolist()
+        sorted_entity_ids = self.sort_tensor(update_cand_ids, old_indices).cpu().numpy().tolist()
 
         for span_idx, span in enumerate(spans):
             wikidata_id = f'Q{str(predicted_entity_ids[span_idx])}'
