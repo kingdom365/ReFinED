@@ -68,6 +68,7 @@ class EDLayer(nn.Module):
         candidate_entity_targets: Optional[Tensor] = None,
         candidate_desc_emb: Optional[Tensor] = None,
     ):
+        TOP_K = 11
         # print('candidate_desc : ', candidate_desc.shape)
         # print('candidate_pem_values : ', candidate_pem_values.shape)
         # print('candidate_classes : ', candidate_classes.shape)
@@ -136,7 +137,7 @@ class EDLayer(nn.Module):
                     # print('gold_entity_idx : ', gold_entity_idx)
                     target_idx = None
                     # select top-5 entity to fine-grained re-rank
-                    fine_grained_set = torch.topk(scores[i, :-1], 5)
+                    fine_grained_set = torch.topk(scores[i, :-1], TOP_K)
                     fine_grained_indices = fine_grained_set.indices
                     # print('fine_grained_indices : ', fine_grained_indices, '; fine_grained_values : ', fine_grained_set.values)
                     ret_cands_idx_mp[i] = []
@@ -149,7 +150,7 @@ class EDLayer(nn.Module):
                     if gold_entity_idx is not None:
                         # gold not include in top-5, hard positive sample
                         # print('gold not include in top-5')
-                        ret_cands_targets.append(torch.tensor(4).to(scores.device).unsqueeze(0))
+                        ret_cands_targets.append(torch.tensor(TOP_K-1).to(scores.device).unsqueeze(0))
                         ret_cands_scores.append(torch.cat([fine_grained_set.values[:-1], scores[i, targets[i]].unsqueeze(0)], dim=-1).unsqueeze(0))
                         ret_cands_desc.append(torch.cat([candidate_desc[i, fine_grained_indices, :][:-1, :], candidate_desc[i, targets[i], :].unsqueeze(0)], dim=0).unsqueeze(0))
                         if candidate_desc_emb is not None:
@@ -157,7 +158,7 @@ class EDLayer(nn.Module):
                         ret_cands_pem_values.append(torch.cat([candidate_pem_values[i, fine_grained_indices][:-1], candidate_pem_values[i, targets[i]].unsqueeze(0)], dim=0).unsqueeze(0))
                         ret_cands_classes.append(torch.cat([candidate_classes[i, fine_grained_indices, :][:-1, :], candidate_classes[i, targets[i], :].unsqueeze(0)], dim=0).unsqueeze(0))
                         for j in range(fine_grained_indices.size(0)):
-                            if j != 4:
+                            if j != TOP_K-1:
                                 ret_cands_idx_mp[i].append(fine_grained_indices[j].item()) 
                             else:
                                 ret_cands_idx_mp[i].append(targets[i])
@@ -175,7 +176,7 @@ class EDLayer(nn.Module):
                             ret_cands_idx_mp[i].append(fine_grained_indices[j].item())
                 else:
                     # gold is NIL, hard positive sample
-                    fine_grained_set = torch.topk(scores[i, :-1], 5)
+                    fine_grained_set = torch.topk(scores[i, :-1], TOP_K)
                     fine_grained_indices = fine_grained_set.indices
                     gold_nil = None
                     trunc_idx = None
@@ -185,7 +186,7 @@ class EDLayer(nn.Module):
                             gold_nil = fine_grained_indices[j]
                             trunc_idx = j
                         indices_set.add(fine_grained_indices[j])
-                    ret_cands_targets.append(torch.tensor(5).to(scores.device).unsqueeze(0))
+                    ret_cands_targets.append(torch.tensor(TOP_K).to(scores.device).unsqueeze(0))
                     if gold_nil is not None:
                         # NIL in cands, remove it, and random resample from 0-29 except indices
                         correct_indices = [num for num in range(30) if num not in indices_set]
@@ -200,7 +201,7 @@ class EDLayer(nn.Module):
                         ret_cands_classes.append(torch.cat([candidate_classes[i, left_fine_indices, :], candidate_classes[i, random_sample_cand_idx, :]], dim=0).unsqueeze(0))
                         ret_cands_idx_mp[i] = []
                         for j in range(fine_grained_indices.size(0)):
-                            if j != 4:
+                            if j != TOP_K-1:
                                 ret_cands_idx_mp[i].append(fine_grained_indices[j].item())
                             else:
                                 ret_cands_idx_mp[i].append(random_sample_cand_idx)
@@ -240,7 +241,7 @@ class EDLayer(nn.Module):
             #         loss += torch.log(torch.exp(scores[i, 1:]).sum(dim=-1))
             #     else:
             #         loss += torch.log(torch.exp(scores[i, :-1]).sum(dim=-1))
-            loss = F.cross_entropy(F.softmax(scores, dim=-1), targets)
+            loss = F.cross_entropy(scores, targets)
 
             # Changed this loss Nov 17 2022 (have not trained model with this yet)
             # loss = F.cross_entropy(scores, targets, ignore_index=scores.size(-1) - 1)
@@ -257,7 +258,7 @@ class EDLayer(nn.Module):
             return loss, F.softmax(scores, dim=-1), (ret_cands_targets, ret_cands_scores, ret_cands_desc, ret_cands_desc_emb, ret_cands_pem_values, ret_cands_classes, ret_cands_idx_mp)
         else:
             # (num_ents, num_cands) ==> (num_ents, 5)
-            fine_grained_set = torch.topk(scores[:, :-1], 5)
+            fine_grained_set = torch.topk(scores[:, :-1], TOP_K)
             ret_cands_scores = fine_grained_set.values
             fine_grained_indices = fine_grained_set.indices
             # print('ret_cands_scores : ', ret_cands_scores.shape)
@@ -271,7 +272,7 @@ class EDLayer(nn.Module):
                 ret_cands_pem_values.append(ent_cands_pem_values)
                 ent_cands_classes = candidate_classes[i, fine_grained_indices[i, :], :].unsqueeze(0)
                 ret_cands_classes.append(ent_cands_classes)
-                ret_cands_idx_mp[i] = [fine_grained_indices[i, j].item() for j in range(5)]
+                ret_cands_idx_mp[i] = [fine_grained_indices[i, j].item() for j in range(TOP_K)]
                 ret_cands_idx_mp[i].append(30)
             ret_cands_desc = torch.cat(ret_cands_desc, dim=0)
             ret_cands_pem_values = torch.cat(ret_cands_pem_values, dim=0)

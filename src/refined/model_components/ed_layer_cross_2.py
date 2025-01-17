@@ -73,7 +73,7 @@ class CrossEncoder(nn.Module):
         batches_spans: List[List[Span]],
         rerank_tuples: Tuple,
     ):
-        WINDOW_SZ = 128
+        WINDOW_SZ = 256
         targets, coarse_scores, cand_desc, candidate_desc_emb, candidate_pem_values, candidate_classes, ret_cands_idx_mp = rerank_tuples
         fuse_token_tn = torch.tensor(self.cross_encoder_pad_token_id).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(1, cand_desc.size(1), 1).to(ctx_tokens.device)
         # print('fuse_token_tn : ', fuse_token_tn.shape)
