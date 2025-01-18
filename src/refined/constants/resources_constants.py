@@ -322,6 +322,7 @@ model_name_to_files: Dict[str, Dict[str, Dict[str, Any]]] = {
     "questions_model": QUESTIONS_MODEL
 }
 
+# datasets meta info
 DATASET_DATA_FILES = {
     "aida_test": {
         "s3_bucket": s3_resource_bucket,
@@ -362,6 +363,36 @@ DATASET_DATA_FILES = {
         "s3_bucket": s3_resource_bucket,
         "s3_key": s3_datasets_prefix + "wikipedia_parsed.json",
         "local_filename": "wikipedia_parsed.json",
+    },
+    "der": {
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "derczynski_parsed.json",
+        "local_filename": "derczynski_parsed.json",
+    },
+    "kore50": {
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "kore50_parsed.json",
+        "local_filename": "kore50_parsed.json",
+    },
+    "r128":{
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "r128_parsed.json",
+        "local_filename": "r128_parsed.json",
+    },
+    "r500":{
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "r500_parsed.json",
+        "local_filename": "r500_parsed.json",
+    },
+    "oke15":{
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "oke15_parsed.json",
+        "local_filename": "oke15_parsed.json",
+    },
+    "oke16":{
+        "s3_bucket": s3_resource_bucket,
+        "s3_key": s3_datasets_prefix + "oke16_parsed.json",
+        "local_filename": "oke16_parsed.json",
     },
 
     # MD datasets for training a standalone MD model

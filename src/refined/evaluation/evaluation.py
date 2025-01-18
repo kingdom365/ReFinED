@@ -158,6 +158,7 @@ def evaluate_on_docs(
     return overall_metrics
 
 
+# final test results function
 def eval_all(
         refined,
         data_dir: Optional[str] = None,
@@ -186,6 +187,7 @@ def eval_all(
                                 )
 
 
+# all datasets, in Dataset class, need to implement self-defined datasets load process
 def get_standard_datasets(datasets: Datasets,
                           el: bool,
                           filter_not_in_kb: bool = True,
@@ -238,6 +240,42 @@ def get_standard_datasets(datasets: Datasets,
                 include_spans=include_spans,
             ),
             "MSNBC": datasets.get_msnbc_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "DER": datasets.get_der_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "KORE50": datasets.get_kore50_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "R128": datasets.get_r128_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "R500": datasets.get_r500_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "OKE15": datasets.get_oke15_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "OKE16": datasets.get_oke16_docs(
                 split="test",
                 include_gold_label=True,
                 filter_not_in_kb=filter_not_in_kb,
