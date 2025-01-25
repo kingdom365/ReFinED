@@ -39,7 +39,6 @@ def process_annotated_document(
         gold_spans.add((span.text, span.start, span.gold_entity.wikidata_entity_id))
         if span.gold_entity.wikidata_entity_id in {qcode for qcode, _ in span.candidate_entities}:
             gold_entity_in_cands += 1
-
     # optionally filter NIL gold spans
     # nil_spans is a set of mention spans that are annotated as mentions in the dataset but are not linked to a KB
     # many nil_spans in public datasets should have been linked to an entity but due to the annotation creation
@@ -172,6 +171,7 @@ def eval_all(
         apply_class_check: bool = False,
         filter_nil_spans: bool = False
 ):
+    download = False
     datasets = get_datasets_obj(preprocessor=refined.preprocessor,
                                 data_dir=data_dir,
                                 datasets_dir=datasets_dir,

@@ -364,7 +364,7 @@ DATASET_DATA_FILES = {
         "s3_key": s3_datasets_prefix + "wikipedia_parsed.json",
         "local_filename": "wikipedia_parsed.json",
     },
-    "der": {
+    "derczynski": {
         "s3_bucket": s3_resource_bucket,
         "s3_key": s3_datasets_prefix + "derczynski_parsed.json",
         "local_filename": "derczynski_parsed.json",

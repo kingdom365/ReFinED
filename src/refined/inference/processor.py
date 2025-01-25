@@ -290,7 +290,7 @@ class Refined(object):
         if self.n_gpu == 1 or True:
             batch = batch.to(self.device)
         self.model.eval()
-        with autocast():
+        with torch.autocast(device_type='cuda'):
             if hasattr(torch, "inference_mode"):
                 inference_mode = torch.inference_mode
             else:

@@ -1,8 +1,8 @@
 from refined.evaluation.evaluation import eval_all
 from refined.inference.processor import Refined
 
-finetuned_path = "/root/autodl-tmp/ReFinED/example_scripts/fine_tuned_models/1733808457/f1_0.9180/"
-refined = Refined.from_pretrained(model_name=finetuned_path,
+# finetuned_path = "/home/lizh/git_mirrors/degreePaper/ReFinED/example_scripts/fine_tuned_models/1733808457/f1_0.9180/"
+refined = Refined.from_pretrained(model_name='aida_model',
                                   entity_set='wikipedia',
                                   use_precomputed_descriptions=False)
 print('EL results (with model fine-tuned on AIDA)')
