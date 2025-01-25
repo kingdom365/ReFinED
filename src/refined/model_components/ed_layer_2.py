@@ -206,7 +206,7 @@ class EDLayer(nn.Module):
 
             # print('ctx_embs : ', ctx_embs.shape)
             # info_nce_loss = self.calc_info_nce_loss(targets, mention_embeddings, candidate_entity_embeddings, scores.device)
-            beta = 0.1
+            beta = 0.01
             total_loss = (1.0 - beta) * loss + beta * info_nce_loss
             # Changed this loss Nov 17 2022 (have not trained model with this yet)
             # loss = F.cross_entropy(scores, targets, ignore_index=scores.size(-1) - 1)

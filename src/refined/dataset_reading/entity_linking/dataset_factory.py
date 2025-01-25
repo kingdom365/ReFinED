@@ -198,6 +198,96 @@ class Datasets:
             filter_not_in_kb=filter_not_in_kb,
         )
 
+    def get_der_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "DER only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['derczynski'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+    
+    def get_kore50_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "KORE50 only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['kore50'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+
+    def get_r128_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "R128 only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['r128'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+
+    def get_r500_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "R500 only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['r500'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+
+    def get_oke15_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "oke15 only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['oke15'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+
+    def get_oke16_docs(
+            self,
+            split: str,
+            include_spans: bool = True,
+            include_gold_label: bool = True,
+            filter_not_in_kb: bool = True,
+    ) -> Iterable[Doc]:
+        assert split == "test", "oke16 only has a test dataset"
+        return self._read_standard_format(
+            filename=self.datasets_to_files['oke16'],
+            include_spans=include_spans,
+            include_gold_label=include_gold_label,
+            filter_not_in_kb=filter_not_in_kb,
+        )
+
     def get_aquaint_docs(
             self,
             split: str,

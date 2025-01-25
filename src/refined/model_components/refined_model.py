@@ -498,7 +498,7 @@ class RefinedModel(nn.Module):
 
         num_ents = len([span for batch_elm in batch_elements for span in batch_elm.spans])
         if num_ents == 0:
-            return None, None, [], special_type_spans, None
+            return None, None, [], special_type_spans, None, None
 
         # NOTE THAT THIS IS NOT THE MAX_SEQ FOR THE BATCH IF MULTI_GPU DataParallel WAS USED.
         # Use token_id.size(1) instead!

@@ -243,6 +243,42 @@ def get_standard_datasets(datasets: Datasets,
                 filter_not_in_kb=filter_not_in_kb,
                 include_spans=include_spans,
             ),
+            "DER": datasets.get_der_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "KORE50": datasets.get_kore50_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "R128": datasets.get_r128_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "R500": datasets.get_r500_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "OKE15": datasets.get_oke15_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
+            "OKE16": datasets.get_oke16_docs(
+                split="test",
+                include_gold_label=True,
+                filter_not_in_kb=filter_not_in_kb,
+                include_spans=include_spans,
+            ),
         }
     return dataset_name_to_docs
 
