@@ -6,7 +6,7 @@ refined = Refined.from_pretrained(model_name='wikipedia_model',
                                   entity_set='wikipedia',
                                   use_precomputed_descriptions=False)
 
-dataset = get_datasets_obj(preprocessor=refined.preprocessor)
+dataset = get_datasets_obj(preprocessor=refined.preprocessor, download=False)
 fine_tune_on_docs(refined=refined,
                   train_docs=dataset.get_aida_docs("train", include_gold_label=True),
                   eval_docs=dataset.get_aida_docs("test", include_gold_label=True))
